@@ -61,20 +61,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // In production, validate state parameter for CSRF protection
+      const clientId = process.env.SHOPIFY_CLIENT_ID || 'your_client_id';
+      const clientSecret = process.env.SHOPIFY_CLIENT_SECRET || 'your_client_secret';
+      
       const tokenData = await authService.exchangeCodeForToken(
         shop as string,
-        code as string
+        code as string,
+        clientId,
+        clientSecret
       );
 
-      // Store the access token
-      await storage.upsertShopSettings({
-        shopDomain: shop as string,
-        accessToken: tokenData.access_token,
-        showVendorColumn: true,
-      });
-
-      // Update shop authentication
-      await authService.updateShopAuthentication(
+      // Store the shop credentials (includes access token storage)
+      await authService.storeShopCredentials(
         shop as string,
         tokenData.access_token,
         tokenData.scope
