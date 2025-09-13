@@ -18,6 +18,117 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Apply general rate limiting to all API routes
   app.use('/api', generalApiLimiter.middleware());
 
+  // OAuth routes (defined FIRST to avoid /api middleware)
+  // OAuth initiation route
+  app.get('/auth/initiate', async (req, res) => {
+    try {
+      const { shop } = req.query;
+      
+      if (!shop || typeof shop !== 'string') {
+        return res.status(400).json({ error: 'Shop domain is required' });
+      }
+
+      const clientId = process.env.SHOPIFY_CLIENT_ID || 'your_client_id';
+      const redirectUri = `${process.env.NODE_ENV === 'production' ? 
+        `https://${req.get('host')}` : 
+        `http://${req.get('host')}`}/auth/callback`;
+      const scopes = ['read_products', 'write_products'];
+      
+      const authUrl = authService.generateShopifyAuthUrl(
+        shop,
+        clientId,
+        redirectUri,
+        scopes
+      );
+
+      res.redirect(authUrl);
+    } catch (error) {
+      logger.error('Failed to initiate OAuth', {
+        shop: req.query.shop,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+      res.status(500).json({ error: 'Failed to initiate authentication' });
+    }
+  });
+
+  // OAuth callback route
+  app.get('/auth/callback', async (req, res) => {
+    try {
+      const { code, shop, state } = req.query;
+      
+      if (!code || !shop) {
+        return res.status(400).json({ error: 'Missing required parameters' });
+      }
+
+      // In production, validate state parameter for CSRF protection
+      const tokenData = await authService.exchangeCodeForToken(
+        shop as string,
+        code as string
+      );
+
+      // Store the access token
+      await storage.upsertShopSettings({
+        shopDomain: shop as string,
+        accessToken: tokenData.access_token,
+        showVendorColumn: true,
+      });
+
+      // Update shop authentication
+      await authService.updateShopAuthentication(
+        shop as string,
+        tokenData.access_token,
+        tokenData.scope
+      );
+
+      // Create session for the authenticated shop
+      const sessionId = authService.createSession(shop as string);
+      
+      logger.authSuccess(shop as string, tokenData.scope);
+
+      // Redirect to frontend with session
+      const frontendUrl = process.env.FRONTEND_URL || `${req.protocol}://${req.get('host')}`;
+      res.redirect(`${frontendUrl}/dashboard?shop=${shop}&session=${sessionId}&installed=true`);
+    } catch (error) {
+      logger.authFailure(
+        req.query.shop as string || 'unknown',
+        error instanceof Error ? error.message : 'Unknown error'
+      );
+      res.status(500).json({ error: 'Authentication failed' });
+    }
+  });
+
+  // Authentication middleware for protected API routes
+  const requireShopAuth = async (req: any, res: any, next: any) => {
+    // Skip auth for health check (already handled above for auth routes)
+    if (req.path === '/api/health') {
+      return next();
+    }
+
+    const { shop, session } = req.query;
+    
+    if (!shop || !session) {
+      return res.status(401).json({ error: 'Shop domain and session are required' });
+    }
+
+    const shopDomain = authService.validateSession(session);
+    
+    if (!shopDomain || shopDomain !== shop) {
+      return res.status(401).json({ error: 'Shop not authenticated' });
+    }
+
+    req.shopDomain = shopDomain;
+    next();
+  };
+
+  // Apply auth middleware to protected API routes (excluding auth routes)
+  app.use('/api', (req: any, res: any, next: any) => {
+    // Skip auth middleware for OAuth routes
+    if (req.path.startsWith('/api/auth/')) {
+      return next();
+    }
+    return requireShopAuth(req, res, next);
+  });
+
   // Middleware to log API calls
   app.use('/api', async (req, res, next) => {
     const start = Date.now();
@@ -436,44 +547,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // OAuth callback endpoint (for Shopify app installation)
-  app.get('/api/auth/callback', async (req, res) => {
-    try {
-      const { code, shop, state } = req.query;
-      
-      if (!code || !shop) {
-        return res.status(400).json({ error: 'Missing required parameters' });
-      }
-
-      // In production, validate state parameter for CSRF protection
-      
-      const clientId = process.env.SHOPIFY_CLIENT_ID || 'your_client_id';
-      const clientSecret = process.env.SHOPIFY_CLIENT_SECRET || 'your_client_secret';
-      
-      const tokenData = await authService.exchangeCodeForToken(
-        shop as string,
-        code as string,
-        clientId,
-        clientSecret
-      );
-
-      await authService.storeShopCredentials(
-        shop as string,
-        tokenData.access_token,
-        tokenData.scope
-      );
-
-      logger.authSuccess(shop as string, tokenData.scope);
-
-      res.redirect(`/dashboard?shop=${shop}&installed=true`);
-    } catch (error) {
-      logger.authFailure(
-        req.query.shop as string || 'unknown',
-        error instanceof Error ? error.message : 'Unknown error'
-      );
-      res.status(400).json({ error: 'Authentication failed' });
-    }
-  });
 
   const httpServer = createServer(app);
   return httpServer;

@@ -1,4 +1,5 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
+import { addSessionToUrl } from "./session";
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
@@ -18,7 +19,10 @@ export async function apiRequest(
   data?: unknown | undefined,
 ): Promise<Response> {
   const baseUrl = getApiBaseUrl();
-  const fullUrl = url.startsWith('/') ? `${baseUrl}${url}` : `${baseUrl}/${url}`;
+  let fullUrl = url.startsWith('/') ? `${baseUrl}${url}` : `${baseUrl}/${url}`;
+  
+  // Add session parameters to URL
+  fullUrl = addSessionToUrl(fullUrl);
   
   const res = await fetch(fullUrl, {
     method,
@@ -38,7 +42,10 @@ export const getQueryFn: <T>(options: {
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
     const baseUrl = getApiBaseUrl();
-    const fullUrl = `${baseUrl}${queryKey.join("/")}`;
+    let fullUrl = `${baseUrl}${queryKey.join("/")}`;
+    
+    // Add session parameters to URL
+    fullUrl = addSessionToUrl(fullUrl);
     
     const res = await fetch(fullUrl, {
       credentials: "include",

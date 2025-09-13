@@ -18,32 +18,26 @@ export function useShopifyAuth() {
     },
   });
 
-  const generateAuthUrlMutation = useMutation({
-    mutationFn: async (shopDomain: string) => {
-      // This would typically call your backend to generate the OAuth URL
-      const clientId = import.meta.env.VITE_SHOPIFY_CLIENT_ID || 'your_client_id';
-      const backendUrl = import.meta.env.VITE_API_URL || window.location.origin;
-      const redirectUri = `${backendUrl}/api/auth/callback`;
-      const scopes = ['read_products', 'write_products'];
-      
-      const params = new URLSearchParams({
-        client_id: clientId,
-        scope: scopes.join(','),
-        redirect_uri: redirectUri,
-        state: crypto.getRandomValues(new Uint32Array(1))[0].toString(16),
-      });
-
-      return `https://${shopDomain}/admin/oauth/authorize?${params.toString()}`;
-    },
-  });
-
   const checkAuthStatus = useCallback(async (shopDomain: string): Promise<ShopAuthStatus> => {
     try {
-      await validateShopMutation.mutateAsync(shopDomain);
-      return {
-        isAuthenticated: true,
-        shopDomain,
-      };
+      // Get session from URL parameters
+      const urlParams = new URLSearchParams(window.location.search);
+      const session = urlParams.get('session');
+      
+      if (session) {
+        // Validate session with backend
+        const response = await apiRequest("GET", `/api/settings?shopDomain=${shopDomain}&session=${session}`);
+        return {
+          isAuthenticated: true,
+          shopDomain,
+        };
+      } else {
+        await validateShopMutation.mutateAsync(shopDomain);
+        return {
+          isAuthenticated: true,
+          shopDomain,
+        };
+      }
     } catch (error) {
       return {
         isAuthenticated: false,
@@ -52,14 +46,11 @@ export function useShopifyAuth() {
     }
   }, [validateShopMutation]);
 
-  const initiateAuth = useCallback(async (shopDomain: string) => {
-    try {
-      const authUrl = await generateAuthUrlMutation.mutateAsync(shopDomain);
-      window.location.href = authUrl;
-    } catch (error) {
-      throw new Error('Failed to initiate authentication');
-    }
-  }, [generateAuthUrlMutation]);
+  const initiateAuth = useCallback((shopDomain: string) => {
+    // Redirect directly to backend OAuth initiation
+    const backendUrl = import.meta.env.VITE_API_URL || window.location.origin;
+    window.location.href = `${backendUrl}/auth/initiate?shop=${shopDomain}`;
+  }, []);
 
   return {
     currentShop,
@@ -67,6 +58,5 @@ export function useShopifyAuth() {
     checkAuthStatus,
     initiateAuth,
     isValidating: validateShopMutation.isPending,
-    isGeneratingAuth: generateAuthUrlMutation.isPending,
   };
 }

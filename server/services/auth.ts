@@ -6,6 +6,7 @@ import type { ShopSettings, InsertShopSettings } from '@shared/schema';
 export class AuthService {
   private readonly ENCRYPTION_KEY: Buffer;
   private readonly ALGORITHM = 'aes-256-gcm';
+  private readonly sessionStore = new Map<string, { shopDomain: string; expiresAt: number }>();
 
   constructor() {
     if (!process.env.SESSION_SECRET) {
@@ -208,6 +209,46 @@ export class AuthService {
         error: error instanceof Error ? error.message : 'Unknown error',
       });
       throw error;
+    }
+  }
+
+  // Session management methods
+  createSession(shopDomain: string): string {
+    const sessionId = crypto.randomBytes(32).toString('hex');
+    const expiresAt = Date.now() + (24 * 60 * 60 * 1000); // 24 hours
+    
+    this.sessionStore.set(sessionId, { shopDomain, expiresAt });
+    this.cleanupExpiredSessions();
+    
+    logger.info('Session created', { sessionId, shopDomain });
+    return sessionId;
+  }
+
+  validateSession(sessionId: string): string | null {
+    if (!sessionId) return null;
+    
+    const session = this.sessionStore.get(sessionId);
+    if (!session) return null;
+    
+    if (Date.now() > session.expiresAt) {
+      this.sessionStore.delete(sessionId);
+      return null;
+    }
+    
+    return session.shopDomain;
+  }
+
+  revokeSession(sessionId: string): void {
+    this.sessionStore.delete(sessionId);
+    logger.info('Session revoked', { sessionId });
+  }
+
+  private cleanupExpiredSessions(): void {
+    const now = Date.now();
+    for (const [sessionId, session] of this.sessionStore.entries()) {
+      if (now > session.expiresAt) {
+        this.sessionStore.delete(sessionId);
+      }
     }
   }
 }
