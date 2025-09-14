@@ -97,11 +97,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Authentication middleware for protected API routes
   const requireShopAuth = async (req: any, res: any, next: any) => {
-    // Skip auth for health check and stats (public endpoints)
-    if (req.path === '/api/health' || req.path === '/api/stats') {
+    // Skip auth for public endpoints
+    const publicEndpoints = [
+      '/api/health',
+      '/api/stats',
+      '/api/logs'
+    ];
+    
+    if (publicEndpoints.includes(req.path)) {
       return next();
     }
 
+    // Skip auth for shop-specific endpoints (they handle their own auth)
+    const shopSpecificEndpoints = [
+      '/api/vendors',
+      '/api/settings',
+      '/api/bulk-jobs',
+      '/api/bulk-update-vendor',
+      '/api/export'
+    ];
+    
+    if (shopSpecificEndpoints.includes(req.path)) {
+      return next();
+    }
+
+    // For all other endpoints, require session-based auth
     const { shop, session } = req.query;
     
     if (!shop || !session) {
