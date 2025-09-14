@@ -97,8 +97,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Authentication middleware for protected API routes
   const requireShopAuth = async (req: any, res: any, next: any) => {
-    // Skip auth for health check (already handled above for auth routes)
-    if (req.path === '/api/health') {
+    // Skip auth for health check and stats (public endpoints)
+    if (req.path === '/api/health' || req.path === '/api/stats') {
       return next();
     }
 
